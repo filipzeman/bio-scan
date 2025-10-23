@@ -168,57 +168,57 @@ export default function CaptureScreen() {
     );
 
     return (
-        <SafeAreaView>
-            <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-                {!capturedPhoto && (
-                    <View style={{ flex: 1, width: '100%', borderRadius: 50, padding: 0 }}>
-                        <CameraViewSection
-                            cameraRef={cameraRef}
-                            onCapture={handleTakePicture}
-                        />
-                    </View>
-                )}
+        // <SafeAreaView>
+        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+            {!capturedPhoto && (
+                <View style={{ flex: 1, width: '100%', borderRadius: 50, padding: 0 }}>
+                    <CameraViewSection
+                        cameraRef={cameraRef}
+                        onCapture={handleTakePicture}
+                    />
+                </View>
+            )}
 
-                {capturedPhoto && (
-                    <View style={styles.previewContainer}>
-                        <Image source={{ uri: capturedPhoto }} style={styles.previewImage} />
-                        <View style={styles.buttonRow}>
+            {capturedPhoto && (
+                <View style={styles.previewContainer}>
+                    <Image source={{ uri: capturedPhoto }} style={styles.previewImage} />
+                    <View style={styles.buttonRow}>
+                        <TouchableOpacity
+                            style={[styles.button, { backgroundColor: theme.colors.primary }]}
+                            onPress={retakePhoto}
+                        >
+                            <Text style={[styles.buttonText, { color: theme.colors.onPrimary }]}>Retake</Text>
+                        </TouchableOpacity>
+                        {!isIdentifying && (
                             <TouchableOpacity
                                 style={[styles.button, { backgroundColor: theme.colors.primary }]}
-                                onPress={retakePhoto}
+                                onPress={handleIdentify}
                             >
-                                <Text style={[styles.buttonText, { color: theme.colors.onPrimary }]}>Retake</Text>
+                                <Text style={[styles.buttonText, { color: theme.colors.onPrimary }]}>Identify</Text>
                             </TouchableOpacity>
-                            {!isIdentifying && (
-                                <TouchableOpacity
-                                    style={[styles.button, { backgroundColor: theme.colors.primary }]}
-                                    onPress={handleIdentify}
-                                >
-                                    <Text style={[styles.buttonText, { color: theme.colors.onPrimary }]}>Identify</Text>
-                                </TouchableOpacity>
-                            )}
-                        </View>
-                        {isIdentifying && <Text style={[styles.infoText, { color: theme.colors.onSurface }]}>Identifying plant...</Text>}
+                        )}
                     </View>
-                )}
+                    {isIdentifying && <Text style={[styles.infoText, { color: theme.colors.onSurface }]}>Identifying plant...</Text>}
+                </View>
+            )}
 
-                {resultDiscovery && !isIdentifying && (
-                    <View style={styles.resultContainer}>
-                        <Text style={[styles.resultTitle, { color: theme.colors.onSurface }]}>Identified:</Text>
-                        <Text style={[styles.resultText, { color: theme.colors.onSurface }]}>{resultDiscovery.speciesName}</Text>
-                        <Text style={[styles.resultText, { color: theme.colors.onSurface }]}>
-                            {resultDiscovery.confidence ? `${(resultDiscovery.confidence * 100).toFixed(1)} %` : '0 %'}
-                        </Text>
-                    </View>
-                )}
+            {resultDiscovery && !isIdentifying && (
+                <View style={styles.resultContainer}>
+                    <Text style={[styles.resultTitle, { color: theme.colors.onSurface }]}>Identified:</Text>
+                    <Text style={[styles.resultText, { color: theme.colors.onSurface }]}>{resultDiscovery.speciesName}</Text>
+                    <Text style={[styles.resultText, { color: theme.colors.onSurface }]}>
+                        {resultDiscovery.confidence ? `${(resultDiscovery.confidence * 100).toFixed(1)} %` : '0 %'}
+                    </Text>
+                </View>
+            )}
 
-                {isIdentifying && <ActivityIndicator size="large" color={theme.colors.primary} />}
+            {isIdentifying && <ActivityIndicator size="large" color={theme.colors.primary} />}
 
-                {!isIdentifying && capturedPhoto && !resultDiscovery && !isLoading && (
-                    <Text style={[styles.infoText, { color: theme.colors.onSurface }]}>No plant was confidently identified.</Text>
-                )}
-            </View>
-        </SafeAreaView>
+            {!isIdentifying && capturedPhoto && !resultDiscovery && !isLoading && (
+                <Text style={[styles.infoText, { color: theme.colors.onSurface }]}>No plant was confidently identified.</Text>
+            )}
+        </View>
+        // </SafeAreaView>
     );
 }
 
