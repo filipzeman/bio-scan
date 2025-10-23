@@ -1,11 +1,12 @@
 // src/api/plantApi.ts
-const API_KEY = 'SVBa9DOn4NXF9hHmVWwkukx9wZTUp578d3sG4ZBwp0TupKVwyB';
+import { API_KEY } from "../constants/keys";
+
 const ENDPOINT = 'https://plant.id/api/v3/identification';
 
 
 export async function identifyPlant(imageBase64: string) {
-    console.log("🧪 Base64 length:", imageBase64?.length);
-    console.log("🧪 Starts with:", imageBase64?.substring(0, 30));
+  console.log("🧪 Base64 length:", imageBase64?.length);
+  console.log("🧪 Starts with:", imageBase64?.substring(0, 30));
   const response = await fetch(ENDPOINT, {
     method: "POST",
     headers: {
