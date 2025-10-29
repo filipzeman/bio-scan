@@ -7,11 +7,12 @@ import {
     Image,
     Text,
     TouchableOpacity,
-    ActivityIndicator
+    ActivityIndicator,
+    ScrollView,
 } from "react-native";
-import { useNavigation, NavigationProp, useRoute } from '@react-navigation/native'
+import { useNavigation, NavigationProp } from '@react-navigation/native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as Location from 'expo-location'
+import * as Location from 'expo-location';
 import * as ImageManipulator from "expo-image-manipulator";
 import * as Crypto from "expo-crypto";
 import { saveDiscovery } from "../utils/storage";
@@ -19,7 +20,9 @@ import { identifyPlant, mockIdentifyPlant } from "../api/plantApi";
 import { Discovery } from "../types/discovery";
 import CameraViewSection from '../components/capture/CameraViewSection';
 import { useTheme } from "react-native-paper";
+import { Ionicons } from "@expo/vector-icons"
 import { SafeAreaView } from "react-native-safe-area-context";
+import { CONFIDENCE_THRESHOLD } from "../constants/constants";
 
 export type RootStackParamList = {
     Home: undefined;
@@ -31,9 +34,12 @@ export default function CaptureScreen() {
     const cameraRef = useRef<CameraView | null>(null);
     const [permission, requestPermission] = useCameraPermissions();
     const [isLoading, setIsLoading] = useState(false);
-    const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null);
+
+    // multi-photo state
+    const [capturedPhotos, setCapturedPhotos] = useState<string[]>([]);
+    const [currentPhoto, setCurrentPhoto] = useState<string | null>(null); // last captured preview
     const [resultDiscovery, setResultDiscovery] = useState<Discovery | null>(null);
-    const [isIdentifying, setIsIdentifying] = useState(false);
+    const [isIdentifying, setIsIdentifying] = useState<boolean>(false);
 
     const navigation = useNavigation<NavigationProp<RootStackParamList>>();
     const theme = useTheme();
@@ -42,8 +48,10 @@ export default function CaptureScreen() {
 
     useEffect(() => {
         if (!permission?.granted) requestPermission();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [permission]);
 
+    // helper: convert local uri to base64
     const uriToBase64 = async (uri: string): Promise<string> => {
         const resp = await fetch(uri);
         const blob = await resp.blob();
@@ -58,11 +66,7 @@ export default function CaptureScreen() {
         });
     };
 
-    const retakePhoto = () => {
-        setCapturedPhoto(null);
-        setResultDiscovery(null);
-    };
-
+    // --- Camera actions ---
     const handleTakePicture = async () => {
         if (!cameraRef.current) {
             Alert.alert("Camera not ready", "Please try again.");
@@ -73,7 +77,17 @@ export default function CaptureScreen() {
             setIsLoading(true);
             const photo = await cameraRef.current.takePictureAsync({ quality: 0.7 });
             if (!photo?.uri) throw new Error("No photo captured");
-            setCapturedPhoto(photo.uri);
+
+            // resize/compress for network efficiency (keep result.uri)
+            const resized = await ImageManipulator.manipulateAsync(
+                photo.uri,
+                [{ resize: { width: 1200 } }], // keep decent resolution; adjust if needed
+                { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+            );
+
+            // append to capturedPhotos and set preview
+            setCapturedPhotos(prev => [...prev, resized.uri]);
+            setCurrentPhoto(resized.uri);
         } catch (err: any) {
             console.error("takePicture error:", err);
             Alert.alert("Error", err?.message ?? "Failed to capture photo.");
@@ -82,71 +96,190 @@ export default function CaptureScreen() {
         }
     };
 
-    const handleIdentify = async () => {
-        if (!capturedPhoto) return;
+    const handleRetake = () => {
+        // Remove last captured photo and go back to camera
+        setCapturedPhotos(prev => {
+            const next = prev.slice(0, -1);
+            setCurrentPhoto(next[next.length - 1] ?? null);
+            return next;
+        });
+        setResultDiscovery(null);
+    };
 
-        let { status } = await Location.requestForegroundPermissionsAsync()
-        if (status !== 'granted') {
-            Alert.alert("Location Required", "Please enable location access to save this discovery.");
-            setIsIdentifying(false);
-            return;
-        }
+    const handleAddAnother = () => {
+        // Just go back to camera (UI should show camera when there is no active preview)
+        setResultDiscovery(null);
+        // keep capturedPhotos intact; UI will allow camera to open again
+        // (we control showing camera vs preview by currentPhoto/capturedPhotos)
+        setCurrentPhoto(null);
+    };
 
-        const currentPosition = await Location.getCurrentPositionAsync({});
+    const removeCapturedAt = (index: number) => {
+        setCapturedPhotos(prev => {
+            const copy = [...prev];
+            copy.splice(index, 1);
+            setCurrentPhoto(copy[copy.length - 1] ?? null);
+            return copy;
+        });
+    };
 
+    // Identify — Option A: identify every photo sequentially and pick the best
+    const identifyMultiplePhotos = async () => {
+        if (!capturedPhotos.length) return null;
+
+        setIsIdentifying(true);
         try {
-            setIsIdentifying(true);
-            const resized = await ImageManipulator.manipulateAsync(
-                capturedPhoto,
-                [{ resize: { width: 800 } }],
-                { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG }
-            );
-
-            const base64 = await uriToBase64(resized.uri);
-
-            const apiResponse = useMock
-                ? await mockIdentifyPlant(resized.uri)
-                : await identifyPlant(base64);
-
-            const top = apiResponse?.result?.classification?.suggestions?.[0] ?? apiResponse?.suggestions?.[0];
-            const speciesName = top?.name ?? top?.plant_name ?? null;
-            const confidence = top?.probability ?? 0;
-
-            if (!speciesName) {
-                Alert.alert("Plant not identified", "No match found.");
-                return;
+            // request location first (we need it for save if success)
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            let currentPosition = null;
+            if (status === 'granted') {
+                currentPosition = await Location.getCurrentPositionAsync({});
+            } else {
+                // user denied location — we can still proceed, but warn
+                Alert.alert("Location not available", "Identification will proceed but discovery won't include location.");
             }
 
+            let bestResult: {
+                speciesName: string | null;
+                confidence: number;
+                photoUri: string;
+                rawResponse?: any;
+            } | null = null;
+
+            for (const uri of capturedPhotos) {
+                try {
+                    // resize again (safe) and convert to base64
+                    const resized = await ImageManipulator.manipulateAsync(
+                        uri,
+                        [{ resize: { width: 800 } }],
+                        { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG }
+                    );
+
+                    const base64 = await uriToBase64(resized.uri);
+
+                    const apiResponse = useMock
+                        ? await mockIdentifyPlant(resized.uri)
+                        : await identifyPlant(base64);
+
+                    console.log("identify response", apiResponse);
+
+                    const top = apiResponse?.result?.classification?.suggestions?.[0] ?? apiResponse?.suggestions?.[0];
+                    const speciesName = top?.name ?? top?.plant_name ?? null;
+                    const confidence = top?.probability ?? 0;
+
+                    console.log('top', top)
+                    console.log('confidence', confidence)
+
+                    if (!speciesName) {
+                        console.log("No species for this photo, skipping");
+                        continue;
+                    }
+
+                    // choose if better than current best
+                    if (!bestResult || confidence > bestResult.confidence) {
+                        bestResult = {
+                            speciesName,
+                            confidence,
+                            photoUri: resized.uri,
+                            rawResponse: apiResponse,
+                        };
+                    }
+
+                    // early exit if above threshold
+                    if (confidence >= CONFIDENCE_THRESHOLD) {
+                        console.log("Early accept at confidence", confidence);
+                        break;
+                    }
+                } catch (singleErr) {
+                    console.warn("identify error for one photo", singleErr);
+                    // continue with other photos
+                }
+            } // end loop
+
+            // Post-processing: check bestResult
+            if (!bestResult) {
+                return { success: false, reason: "no_match" };
+            }
+
+            // If best below threshold → return low_confidence
+            if (bestResult.confidence < CONFIDENCE_THRESHOLD) {
+                return { success: false, reason: "low_confidence", best: bestResult };
+            }
+
+            // Build discovery object (choose primary photoUri from bestResult)
             const id = await Crypto.randomUUID();
-            const discovery: Discovery = {
+            const discovery: any = {
                 id,
-                speciesName,
-                confidence,
-                photoUri: resized.uri,
+                speciesName: bestResult.speciesName,
+                confidence: bestResult.confidence,
+                photoUri: bestResult.photoUri, // primary
+                photoUris: capturedPhotos,     // all photos (optional — update Discovery type if strict)
                 createdAt: new Date().toISOString(),
-                location: {
+                location: currentPosition ? {
                     latitude: currentPosition.coords.latitude,
                     longitude: currentPosition.coords.longitude
-                }
+                } : undefined,
             };
 
-            await saveDiscovery(discovery);
-            setResultDiscovery(discovery);
+            console.log('')
 
+            // persist and return success
+            await saveDiscovery(discovery as Discovery);
+            setResultDiscovery(discovery as Discovery);
+
+            // optionally navigate to Discoveries
             navigation.navigate('Discoveries', { newDiscovery: discovery });
 
-            Alert.alert(
-                "🌿 Plant Identified",
-                `${speciesName}\nConfidence: ${(confidence * 100).toFixed(1)}%`
-            );
-        } catch (err: any) {
-            console.error("identify error:", err);
-            Alert.alert("Error", err?.message ?? "Failed to identify plant.");
+            return { success: true, discovery, raw: bestResult.rawResponse };
+        } catch (err) {
+            console.error("identifyMultiplePhotos error:", err);
+            return { success: false, reason: "error", error: err };
         } finally {
             setIsIdentifying(false);
         }
     };
 
+    const handleIdentify = async () => {
+        if (!capturedPhotos.length) {
+            Alert.alert("No photo", "Please take a photo first.");
+            return;
+        }
+
+        const result = await identifyMultiplePhotos();
+
+        if (!result) {
+            Alert.alert("Identification failed", "No result returned.");
+            return;
+        }
+
+        if (result.success === false) {
+            if (result.reason === "low_confidence") {
+                Alert.alert(
+                    "Low confidence",
+                    "The photos returned low confidence. Try taking clearer pictures (leaf close-up, fruit, whole plant) or add another photo."
+                );
+                // keep user in capture flow to retake/add
+                return;
+            } else if (result.reason === "no_match") {
+                Alert.alert("No match", "We couldn't find a match for these photos.");
+                return;
+            } else {
+                Alert.alert("Error", "Identification failed. Try again.");
+                return;
+            }
+        }
+
+        // success: discovery already saved inside identifyMultiplePhotos and resultDiscovery set
+        Alert.alert("🌿 Plant Identified", `${(result.discovery.confidence * 100).toFixed(1)}% — ${result.discovery.speciesName}`);
+        // reset captured photos so user can start new identification if desired
+        setCapturedPhotos([]);
+        setCurrentPhoto(null);
+    };
+
+    // UI states for camera vs preview:
+    const showingPreview = currentPhoto !== null && capturedPhotos.length > 0;
+
+    // Permission UI
     if (!permission) return (
         <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
             <Text style={{ color: theme.colors.onSurface }}>Checking permissions...</Text>
@@ -167,11 +300,11 @@ export default function CaptureScreen() {
         </View>
     );
 
+    // Render
     return (
-        // <SafeAreaView>
-        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-            {!capturedPhoto && (
-                <View style={{ flex: 1, width: '100%', borderRadius: 50, padding: 0 }}>
+        <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
+            {!showingPreview && (
+                <View style={{ flex: 1, width: '100%', }}>
                     <CameraViewSection
                         cameraRef={cameraRef}
                         onCapture={handleTakePicture}
@@ -179,26 +312,84 @@ export default function CaptureScreen() {
                 </View>
             )}
 
-            {capturedPhoto && (
+            {showingPreview && (
                 <View style={styles.previewContainer}>
-                    <Image source={{ uri: capturedPhoto }} style={styles.previewImage} />
-                    <View style={styles.buttonRow}>
-                        <TouchableOpacity
-                            style={[styles.button, { backgroundColor: theme.colors.primary }]}
-                            onPress={retakePhoto}
-                        >
-                            <Text style={[styles.buttonText, { color: theme.colors.onPrimary }]}>Retake</Text>
-                        </TouchableOpacity>
-                        {!isIdentifying && (
-                            <TouchableOpacity
-                                style={[styles.button, { backgroundColor: theme.colors.primary }]}
-                                onPress={handleIdentify}
-                            >
-                                <Text style={[styles.buttonText, { color: theme.colors.onPrimary }]}>Identify</Text>
+                    {/* show the latest captured photo as main preview */}
+                    <Image source={{ uri: currentPhoto ?? capturedPhotos[0] }} style={styles.previewImage} />
+
+                    {/* thumbnails row */}
+                    <ScrollView horizontal showsHorizontalScrollIndicator={true} style={{ marginVertical: 8 }}>
+                        {capturedPhotos.map((uri, idx) => (
+                            <TouchableOpacity key={uri + idx} onPress={() => setCurrentPhoto(uri)} onLongPress={() => removeCapturedAt(idx)}>
+                                <Image source={{ uri }} style={[styles.thumb, currentPhoto === uri ? styles.thumbActive : null]} />
                             </TouchableOpacity>
-                        )}
-                    </View>
-                    {isIdentifying && <Text style={[styles.infoText, { color: theme.colors.onSurface }]}>Identifying plant...</Text>}
+                        ))}
+                    </ScrollView>
+
+                    {capturedPhotos && (
+                        <View style={styles.actionContainer}>
+                            {/* Retake */}
+                            <TouchableOpacity
+                                style={[styles.actionCard, { backgroundColor: theme.colors.primaryContainer }]}
+                                onPress={handleRetake}
+                                disabled={isIdentifying}
+                            >
+                                <Ionicons
+                                    name="refresh"
+                                    size={28}
+                                    color={theme.colors.primary}
+                                />
+                                <Text style={[styles.actionLabel, { color: theme.colors.onSurface }]}>
+                                    Retake
+                                </Text>
+                            </TouchableOpacity>
+
+                            {/* Identify */}
+                            <TouchableOpacity
+                                style={[
+                                    styles.actionCard,
+                                    { backgroundColor: theme.colors.primaryContainer },
+                                ]}
+                                onPress={handleIdentify}
+                                disabled={isIdentifying}
+                            >
+                                {isIdentifying ?
+                                    (<ActivityIndicator size="large" color={theme.colors.primary} style={{ marginTop: 12 }} />)
+                                    : (<>< Ionicons
+                                        name="leaf-outline"
+                                        size={28}
+                                        color={theme.colors.onPrimaryContainer}
+                                    />
+                                        <Text
+                                            style={[
+                                                styles.actionLabel,
+                                                { color: theme.colors.onPrimaryContainer },
+                                            ]}
+                                        >
+                                            {isIdentifying ? "Identifying..." : "Identify"}
+                                        </Text></>)}
+
+                            </TouchableOpacity>
+                            {/* Add */}
+                            <TouchableOpacity
+                                style={[styles.actionCard, { backgroundColor: theme.colors.primaryContainer }]}
+                                onPress={handleAddAnother}
+                                disabled={isIdentifying}
+                            >
+                                <Ionicons
+                                    name="add-circle-outline"
+                                    size={28}
+                                    color={theme.colors.primary}
+                                />
+                                {<Text style={[styles.actionLabel, { color: theme.colors.onSurface }]}>
+                                    Add
+                                </Text>}
+                            </TouchableOpacity>
+                        </View>
+                    )}
+
+
+
                 </View>
             )}
 
@@ -211,26 +402,40 @@ export default function CaptureScreen() {
                     </Text>
                 </View>
             )}
-
-            {isIdentifying && <ActivityIndicator size="large" color={theme.colors.primary} />}
-
-            {!isIdentifying && capturedPhoto && !resultDiscovery && !isLoading && (
-                <Text style={[styles.infoText, { color: theme.colors.onSurface }]}>No plant was confidently identified.</Text>
-            )}
-        </View>
-        // </SafeAreaView>
+        </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, padding: 32, borderRadius: 32, justifyContent: 'center', alignItems: 'center' },
-    previewContainer: { flex: 1, width: '100%', justifyContent: 'center', alignItems: 'center' },
-    previewImage: { width: '100%', height: '65%', borderRadius: 12, resizeMode: 'cover', marginBottom: 20 },
+    container: { flex: 1 },
+    previewContainer: { flex: 1, paddingTop: 16, paddingHorizontal: 16, width: '100%', justifyContent: 'center', alignItems: 'center' },
+    previewImage: { width: '100%', height: '60%', borderRadius: 12, resizeMode: 'cover', marginBottom: 12 },
+    thumb: { width: 72, height: 72, borderRadius: 8, marginRight: 8, borderWidth: 2, borderColor: 'transparent' },
+    thumbActive: { borderColor: '#28a745' },
     buttonRow: { flexDirection: 'row', justifyContent: 'space-evenly', width: '100%', marginBottom: 12 },
-    button: { paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8, minWidth: 120, alignItems: 'center' },
+    button: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 8, minWidth: 100, alignItems: 'center' },
     buttonText: { fontWeight: '600', fontSize: 16 },
-    infoText: { fontSize: 16, marginTop: 10 },
     resultContainer: { alignItems: 'center', padding: 16 },
     resultTitle: { fontSize: 20, fontWeight: '700', marginBottom: 8 },
     resultText: { fontSize: 18, marginBottom: 16 },
+    actionContainer: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        width: "100%",
+        marginTop: 8,
+    },
+    actionCard: {
+        width: 100,
+        height: 90,
+        borderRadius: 16,
+        justifyContent: "center",
+        alignItems: "center",
+        elevation: 2,
+    },
+    actionLabel: {
+        marginTop: 6,
+        fontSize: 14,
+        fontWeight: "500",
+    },
 });

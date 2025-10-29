@@ -1,0 +1,1 @@
+export const CONFIDENCE_THRESHOLD: number = 0.6
