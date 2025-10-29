@@ -35,6 +35,7 @@ export default function DiscoveriesScreen() {
         const loadDiscoveries = async () => {
             const savedPlants = (await getDiscoveries()).filter(d => !!d.photoUri);
             setDiscoveries(savedPlants);
+            console.log('all saved data', savedPlants)
         };
         loadDiscoveries();
     }, []);

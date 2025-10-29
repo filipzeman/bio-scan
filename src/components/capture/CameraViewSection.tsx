@@ -1,6 +1,7 @@
 import React from "react";
 import { View, TouchableOpacity, Text, StyleSheet } from 'react-native'
 import { CameraView } from 'expo-camera'
+import { SafeAreaView } from "react-native-safe-area-context";
 
 interface CameraViewSectionProps {
     cameraRef: React.RefObject<CameraView | null>
@@ -12,10 +13,10 @@ const CameraViewSection: React.FC<CameraViewSectionProps> = ({
     onCapture,
 }) => {
     return (
-        <View style={{ flex: 1, margin: -32 }}>
+        <View style={{ flex: 1 }}>
             <CameraView
                 ref={cameraRef}
-                style={{ flex: 1 }}
+                style={{ flex: 1, marginBottom: -32 }}
             />
             <TouchableOpacity
                 style={{
