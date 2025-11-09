@@ -1,46 +1,68 @@
 // src/api/plantApi.ts
-import { API_KEY } from "../constants/keys";
+import { API_KEY, API_ENDPOINT } from "../constants/keys";
 
-const ENDPOINT = 'https://plant.id/api/v3/identification';
-
-
-export async function identifyPlant(imageBase64: string) {
-  console.log("🧪 Base64 length:", imageBase64?.length);
-  console.log("🧪 Starts with:", imageBase64?.substring(0, 30));
-  const response = await fetch(ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Api-Key": API_KEY,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      images: [imageBase64],
-      similar_images: true,
-    }),
-  });
-
-  const rawText = await response.text();
-  console.log("Plant.id raw response text:", rawText);
-
-  // ✅ safely parse JSON only if it's valid JSON
-  let data: any;
+export async function identifyMultiplePhotos(base64Images: string[]) {
   try {
-    data = JSON.parse(rawText);
-  } catch {
-    throw new Error(`Plant.id returned non-JSON: ${rawText}`);
-  }
+    console.log('🧪  Real plantID request sent')
+    const response = await fetch(API_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Api-Key": API_KEY,
+      },
+      body: JSON.stringify({
+        images: base64Images,
+        similar_images: true, // optional, useful for debugging
+        classification_level: "species",
+        // optionally add: 'modifiers': ['similar_images'], 'plant_language': 'en', etc.
+      }),
+    });
 
-  if (!response.ok) {
-    throw new Error(
-      `Plant.id API HTTP ${response.status}: ${data?.message || rawText}`
-    );
-  }
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`API request failed: ${response.status} ${errText}`);
+    }
 
-  return data;
+    const json = await response.json();
+    return json;
+  } catch (error) {
+    // console.error("identifyMultiplePhotos error:", error);
+    console.error("identifyMultiplePhotos error:");
+    throw error;
+  }
 }
 
+// export async function identifyMultiplePhotos(base64Images: string[]) {
+//   try {
+//     const response = await fetch("https://api.plant.id/v3/identify", {
+//       method: "POST",
+//       headers: {
+//         "Content-Type": "application/json",
+//         "Api-Key": API_KEY,
+//       },
+//       body: JSON.stringify({
+//         images: base64Images,
+//         similar_images: true, // optional, useful for debugging
+//         classification_level: "plant",
+//         // optionally add: 'modifiers': ['similar_images'], 'plant_language': 'en', etc.
+//       }),
+//     });
+
+//     if (!response.ok) {
+//       const errText = await response.text();
+//       throw new Error(`API request failed: ${response.status} ${errText}`);
+//     }
+
+//     const json = await response.json();
+//     return json;
+//   } catch (error) {
+//     console.error("identifyMultiplePhotos error:", error);
+//     throw error;
+//   }
+// }
+
 export const mockIdentifyPlant = async (imageUri: string) => {
-  console.log("🧪 Mock identifyPlant called with", imageUri);
+  console.log("🧪  Mock identifyPlant called");
   await new Promise((r) => setTimeout(r, 1500)); // simulate network delay
   return {
     speciesName: "Quercus robur (English Oak)",

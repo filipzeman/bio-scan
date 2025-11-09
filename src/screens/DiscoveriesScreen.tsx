@@ -33,9 +33,9 @@ export default function DiscoveriesScreen() {
 
     useEffect(() => {
         const loadDiscoveries = async () => {
-            const savedPlants = (await getDiscoveries()).filter(d => !!d.photoUri);
+            const savedPlants = (await getDiscoveries()).filter(d => !!d.photos[0]);
             setDiscoveries(savedPlants);
-            console.log('all saved data', savedPlants)
+            console.log('🗃️   Number of records:', savedPlants.length)
         };
         loadDiscoveries();
     }, []);
@@ -69,7 +69,19 @@ export default function DiscoveriesScreen() {
                     activeOpacity={1}
                 >
                     <View style={[styles.resultCard, { backgroundColor: theme.colors.surface }]}>
-                        <Image source={{ uri: item.photoUri }} style={styles.thumbnail} />
+                        {item.photos?.[0] ? (
+                            <Image
+                                source={{
+                                    uri:
+                                        item.wikiInfo?.imageUrl
+                                }}
+                                style={styles.thumbnail}
+                            />
+                        ) : (
+                            <View style={[styles.thumbnail, { backgroundColor: '#ccc', justifyContent: 'center', alignItems: 'center' }]}>
+                                <Text style={{ color: '#666' }}>No Image</Text>
+                            </View>)}
+
                         <View style={{ flex: 1, marginLeft: 12 }}>
                             <Text style={[styles.resultTitle, { color: theme.colors.onSurface }]}>
                                 {item.speciesName}
@@ -101,8 +113,8 @@ export default function DiscoveriesScreen() {
             followsUserLocation
             mapType='satellite'
             region={{
-                latitude: discoveries[0]?.location?.latitude || 50.0158,
-                longitude: discoveries[0]?.location?.longitude || 15.7402,
+                latitude: discoveries[0]?.locations[0]?.latitude || 50.0158,
+                longitude: discoveries[0]?.locations[0]?.longitude || 15.7402,
                 latitudeDelta: 0.1,
                 longitudeDelta: 0.1,
             }}
@@ -110,10 +122,10 @@ export default function DiscoveriesScreen() {
             style={styles.map}
             {...discoveries[0]}
         >
-            {discoveries.map(d => d.location && (
+            {discoveries.map(d => d.locations[0] && (
                 <Marker
                     key={d.id}
-                    coordinate={{ latitude: d.location.latitude, longitude: d.location.longitude }}
+                    coordinate={{ latitude: d.locations[0].latitude, longitude: d.locations[0].longitude }}
                     title={d.speciesName}
                 />
             ))}
@@ -212,7 +224,8 @@ const styles = StyleSheet.create({
     thumbnail: {
         width: 80,
         height: 80,
-        resizeMode: "cover",
+        // borderRadius: 5,
+        // resizeMode: "cover",
     },
     map: {
         marginLeft: -8,

@@ -6,9 +6,29 @@ const DISCOVERIES_KEY = "discoveries";
 export async function saveDiscovery(discovery: Discovery) {
     const existing = await getDiscoveries();
 
-    const updated = existing.some(d => d.id === discovery.id)
-        ? existing.map(d => (d.id === discovery.id ? discovery : d))
-        : [...existing, discovery];
+    const existingDiscovery = existing.find((d) => d.speciesName.toLowerCase() === discovery.speciesName.toLocaleLowerCase());
+
+    let updated: Discovery[];
+
+    if (existingDiscovery) {
+        const merged: Discovery = {
+            ...existingDiscovery,
+            confidence: discovery.confidence ?? existingDiscovery.confidence,
+            photos: Array.from(new Set([...existingDiscovery.photos, ...discovery.photos])),
+            locations: [...existingDiscovery.locations, ...discovery.locations],
+            updatedAt: new Date().toISOString(),
+        }
+
+        updated = existing.map((d) => d.speciesName === merged.speciesName ? merged : d)
+    } else {
+        updated = [...existing, discovery]
+    }
+
+    // const updated = existing.some(d => d.id === discovery.id)
+    //     ? existing.map(d => (d.id === discovery.id ? discovery : d))
+    //     : [...existing, discovery];
+
+    console.log('updated records', updated)
 
     await AsyncStorage.setItem('discoveries', JSON.stringify(updated));
 }

@@ -16,7 +16,7 @@ import * as Location from 'expo-location';
 import * as ImageManipulator from "expo-image-manipulator";
 import * as Crypto from "expo-crypto";
 import { saveDiscovery } from "../utils/storage";
-import { identifyPlant, mockIdentifyPlant } from "../api/plantApi";
+import { identifyMultiplePhotos, mockIdentifyPlant } from "../api/plantApi";
 import { Discovery } from "../types/discovery";
 import CameraViewSection from '../components/capture/CameraViewSection';
 import { useTheme } from "react-native-paper";
@@ -90,7 +90,7 @@ export default function CaptureScreen() {
             setCurrentPhoto(resized.uri);
         } catch (err: any) {
             console.error("takePicture error:", err);
-            Alert.alert("Error", err?.message ?? "Failed to capture photo.");
+            Alert.alert("Error to capture", err?.message ?? "Failed to capture photo.");
         } finally {
             setIsLoading(false);
         }
@@ -123,157 +123,75 @@ export default function CaptureScreen() {
         });
     };
 
-    // Identify — Option A: identify every photo sequentially and pick the best
-    const identifyMultiplePhotos = async () => {
-        if (!capturedPhotos.length) return null;
 
-        setIsIdentifying(true);
+    const handleIdentify = async () => {
+        if (capturedPhotos.length === 0) return;
+        if (isIdentifying) return
+
+        let { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") {
+            Alert.alert("Location Required", "Please enable location access to save this discovery.");
+            return;
+        }
+
+        const currentPosition = await Location.getCurrentPositionAsync({});
+
         try {
-            // request location first (we need it for save if success)
-            const { status } = await Location.requestForegroundPermissionsAsync();
-            let currentPosition = null;
-            if (status === 'granted') {
-                currentPosition = await Location.getCurrentPositionAsync({});
-            } else {
-                // user denied location — we can still proceed, but warn
-                Alert.alert("Location not available", "Identification will proceed but discovery won't include location.");
+            setIsIdentifying(true);
+
+            const base64List = []
+            for (const photoUri of capturedPhotos) {
+                const resized = await ImageManipulator.manipulateAsync(
+                    photoUri,
+                    [{ resize: { width: 800 } }],
+                    { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG }
+                );
+                const base64 = await uriToBase64(resized.uri);
+                base64List.push(base64);
             }
 
-            let bestResult: {
-                speciesName: string | null;
-                confidence: number;
-                photoUri: string;
-                rawResponse?: any;
-            } | null = null;
+            const apiResponse = useMock
+                ? await mockIdentifyPlant(base64List[0])
+                : await identifyMultiplePhotos(base64List);
+            const top = apiResponse?.suggestions?.[0] ?? apiResponse?.result?.classification?.suggestions?.[0];
 
-            for (const uri of capturedPhotos) {
-                try {
-                    // resize again (safe) and convert to base64
-                    const resized = await ImageManipulator.manipulateAsync(
-                        uri,
-                        [{ resize: { width: 800 } }],
-                        { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG }
-                    );
+            const speciesName = top?.name ?? top?.plant_name ?? null;
+            const confidence = top?.probability ?? 0;
 
-                    const base64 = await uriToBase64(resized.uri);
-
-                    const apiResponse = useMock
-                        ? await mockIdentifyPlant(resized.uri)
-                        : await identifyPlant(base64);
-
-                    console.log("identify response", apiResponse);
-
-                    const top = apiResponse?.result?.classification?.suggestions?.[0] ?? apiResponse?.suggestions?.[0];
-                    const speciesName = top?.name ?? top?.plant_name ?? null;
-                    const confidence = top?.probability ?? 0;
-
-                    console.log('top', top)
-                    console.log('confidence', confidence)
-
-                    if (!speciesName) {
-                        console.log("No species for this photo, skipping");
-                        continue;
-                    }
-
-                    // choose if better than current best
-                    if (!bestResult || confidence > bestResult.confidence) {
-                        bestResult = {
-                            speciesName,
-                            confidence,
-                            photoUri: resized.uri,
-                            rawResponse: apiResponse,
-                        };
-                    }
-
-                    // early exit if above threshold
-                    if (confidence >= CONFIDENCE_THRESHOLD) {
-                        console.log("Early accept at confidence", confidence);
-                        break;
-                    }
-                } catch (singleErr) {
-                    console.warn("identify error for one photo", singleErr);
-                    // continue with other photos
-                }
-            } // end loop
-
-            // Post-processing: check bestResult
-            if (!bestResult) {
-                return { success: false, reason: "no_match" };
+            if (!speciesName) {
+                Alert.alert("Plant not identified", "No match found, please try to add more photos.");
+                return;
             }
 
-            // If best below threshold → return low_confidence
-            if (bestResult.confidence < CONFIDENCE_THRESHOLD) {
-                return { success: false, reason: "low_confidence", best: bestResult };
-            }
+            // here we should tell user to add more or have possibility to throw photos out
 
-            // Build discovery object (choose primary photoUri from bestResult)
             const id = await Crypto.randomUUID();
-            const discovery: any = {
+            const discovery: Discovery = {
                 id,
-                speciesName: bestResult.speciesName,
-                confidence: bestResult.confidence,
-                photoUri: bestResult.photoUri, // primary
-                photoUris: capturedPhotos,     // all photos (optional — update Discovery type if strict)
+                speciesName,
+                confidence,
+                photos: [capturedPhotos[0]],
                 createdAt: new Date().toISOString(),
-                location: currentPosition ? {
+                locations: [{
                     latitude: currentPosition.coords.latitude,
-                    longitude: currentPosition.coords.longitude
-                } : undefined,
+                    longitude: currentPosition.coords.longitude,
+                    date: new Date().toISOString(),
+                }],
+                updatedAt: '',
             };
+            // need to check if we already have record with same speciesName, so we don't save another but just update existing one (add another location & time)
+            await saveDiscovery(discovery);
+            navigation.navigate("Discoveries", { newDiscovery: discovery });
+            setCapturedPhotos([])
+            setIsIdentifying(false)
 
-            console.log('')
-
-            // persist and return success
-            await saveDiscovery(discovery as Discovery);
-            setResultDiscovery(discovery as Discovery);
-
-            // optionally navigate to Discoveries
-            navigation.navigate('Discoveries', { newDiscovery: discovery });
-
-            return { success: true, discovery, raw: bestResult.rawResponse };
-        } catch (err) {
-            console.error("identifyMultiplePhotos error:", err);
-            return { success: false, reason: "error", error: err };
+            Alert.alert("🌿 Plant Identified", `${speciesName}\nConfidence: ${(confidence * 100).toFixed(1)}%`);
+        } catch (err: any) {
+            console.error("identify error:", err);
+            Alert.alert("Error", err?.message ?? "Failed to identify plant.");
         } finally {
             setIsIdentifying(false);
         }
-    };
-
-    const handleIdentify = async () => {
-        if (!capturedPhotos.length) {
-            Alert.alert("No photo", "Please take a photo first.");
-            return;
-        }
-
-        const result = await identifyMultiplePhotos();
-
-        if (!result) {
-            Alert.alert("Identification failed", "No result returned.");
-            return;
-        }
-
-        if (result.success === false) {
-            if (result.reason === "low_confidence") {
-                Alert.alert(
-                    "Low confidence",
-                    "The photos returned low confidence. Try taking clearer pictures (leaf close-up, fruit, whole plant) or add another photo."
-                );
-                // keep user in capture flow to retake/add
-                return;
-            } else if (result.reason === "no_match") {
-                Alert.alert("No match", "We couldn't find a match for these photos.");
-                return;
-            } else {
-                Alert.alert("Error", "Identification failed. Try again.");
-                return;
-            }
-        }
-
-        // success: discovery already saved inside identifyMultiplePhotos and resultDiscovery set
-        Alert.alert("🌿 Plant Identified", `${(result.discovery.confidence * 100).toFixed(1)}% — ${result.discovery.speciesName}`);
-        // reset captured photos so user can start new identification if desired
-        setCapturedPhotos([]);
-        setCurrentPhoto(null);
     };
 
     // UI states for camera vs preview:

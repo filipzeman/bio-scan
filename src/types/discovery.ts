@@ -10,12 +10,17 @@ export interface WikiInfo {
 export type Discovery = {
   id: string;
   speciesName: string;
-  photoUri: string;
+  photos: string[];
   createdAt: string;
+  updatedAt: string;
   confidence?: number;
-  location?: {
-    latitude: number;
-    longitude: number;
-  };
+  locations: Location[];
   wikiInfo?: WikiInfo
 };
+
+
+export type Location = {
+  latitude: number;
+  longitude: number;
+  date: string;
+}
