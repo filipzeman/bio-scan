@@ -150,16 +150,37 @@ export default function CaptureScreen() {
                 base64List.push(base64);
             }
 
-            const apiResponse = useMock
-                ? await mockIdentifyPlant(base64List[0])
-                : await identifyMultiplePhotos(base64List);
-            const top = apiResponse?.suggestions?.[0] ?? apiResponse?.result?.classification?.suggestions?.[0];
 
+
+            const apiResponse = useMock
+                ? await mockIdentifyPlant(base64List)
+                : await identifyMultiplePhotos(base64List);
+
+            if (!apiResponse || typeof apiResponse !== "object") {
+                throw new Error("Invalid API response (undefined or not an object)");
+            }
+
+            let suggestions: any[] = [];
+
+            if (Array.isArray(apiResponse.suggestions)) {
+                suggestions = apiResponse.suggestions;
+            } else if (
+                apiResponse.result &&
+                apiResponse.result.classification &&
+                Array.isArray(apiResponse.result.classification.suggestions)
+            ) {
+                suggestions = apiResponse.result.classification.suggestions;
+            } else {
+                console.log("⚠️ Unexpected API structure:", apiResponse);
+                throw new Error("Unrecognized API response structure");
+            }
+
+            const top = suggestions[0];
             const speciesName = top?.name ?? top?.plant_name ?? null;
             const confidence = top?.probability ?? 0;
 
-            if (!speciesName) {
-                Alert.alert("Plant not identified", "No match found, please try to add more photos.");
+            if (!speciesName || confidence < CONFIDENCE_THRESHOLD) {
+                Alert.alert("Plant not identified", "No match found or confidence too low, please try to add more photos.");
                 return;
             }
 

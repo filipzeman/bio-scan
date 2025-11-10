@@ -25,7 +25,6 @@ export default function PlantDetailScreen() {
             try {
                 setIsLoading(true);
 
-                // ✅ Use speciesName as query
                 const query = discovery.speciesName.replace(/\s/g, "_");
                 const url = `https://cs.wikipedia.org/api/rest_v1/page/summary/${query}`;
                 const resp = await fetch(url);
@@ -73,12 +72,6 @@ export default function PlantDetailScreen() {
                     <View style={styles.headerSection}>
                         {wikiInfo && <Text style={styles.title}>{wikiInfo?.title || discovery.speciesName}</Text>}
                         <Text style={styles.subtitle}>{discovery.speciesName}</Text>
-                        {/* <Text style={styles.confidence}>
-                            Confidence: {discovery.confidence ? (discovery.confidence * 100).toFixed(1) : 0}%
-                        </Text> */}
-                        {/* {wikiInfo?.scientificName && (
-                    <Text style={styles.scientificName}>({wikiInfo.scientificName})</Text>
-                )} */}
                     </View>
 
                     {/* About Section */}
@@ -90,6 +83,10 @@ export default function PlantDetailScreen() {
                             <Text style={styles.sectionText}>{wikiInfo?.extract || "No information available."}</Text>
                         )}
                     </View>
+                    {discovery?.createdAt && (<View style={styles.section}>
+                        <Text style={styles.sectionTitle}>📖 Captured</Text>
+                        <Text style={styles.sectionText}>{discovery.createdAt}</Text>
+                    </View>)}
 
                     {/* Scientific Section */}
                     {wikiInfo?.scientificName && (
@@ -108,6 +105,12 @@ export default function PlantDetailScreen() {
                             </Text>
                         </View>
                     )}
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>📝 Notes</Text>
+                        <Text style={styles.sectionText}>
+                            Placeholder
+                        </Text>
+                    </View>
                 </ScrollView>
             </SafeAreaView>
 

@@ -24,6 +24,7 @@ export async function identifyMultiplePhotos(base64Images: string[]) {
     }
 
     const json = await response.json();
+
     return json;
   } catch (error) {
     // console.error("identifyMultiplePhotos error:", error);
@@ -32,36 +33,7 @@ export async function identifyMultiplePhotos(base64Images: string[]) {
   }
 }
 
-// export async function identifyMultiplePhotos(base64Images: string[]) {
-//   try {
-//     const response = await fetch("https://api.plant.id/v3/identify", {
-//       method: "POST",
-//       headers: {
-//         "Content-Type": "application/json",
-//         "Api-Key": API_KEY,
-//       },
-//       body: JSON.stringify({
-//         images: base64Images,
-//         similar_images: true, // optional, useful for debugging
-//         classification_level: "plant",
-//         // optionally add: 'modifiers': ['similar_images'], 'plant_language': 'en', etc.
-//       }),
-//     });
-
-//     if (!response.ok) {
-//       const errText = await response.text();
-//       throw new Error(`API request failed: ${response.status} ${errText}`);
-//     }
-
-//     const json = await response.json();
-//     return json;
-//   } catch (error) {
-//     console.error("identifyMultiplePhotos error:", error);
-//     throw error;
-//   }
-// }
-
-export const mockIdentifyPlant = async (imageUri: string) => {
+export const mockIdentifyPlant = async (base64Images: string[]) => {
   console.log("🧪  Mock identifyPlant called");
   await new Promise((r) => setTimeout(r, 1500)); // simulate network delay
   return {
