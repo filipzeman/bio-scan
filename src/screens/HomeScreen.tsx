@@ -8,6 +8,7 @@ import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs'
 export default function HomeScreen() {
     const theme = useTheme()
     const navigation = useNavigation<BottomTabNavigationProp<RootTabParamList>>()
+    console.log("SUPABASE URL:", process.env.EXPO_PUBLIC_SUPABASE_URL);
 
     return (
         <View style={[styles.container, { backgroundColor: theme.colors.background }]}>

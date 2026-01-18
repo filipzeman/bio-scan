@@ -10,10 +10,11 @@ export interface WikiInfo {
 export type Discovery = {
   id: string;
   speciesName: string;
+  confidence?: number;
   photos: string[];
   createdAt: string;
   updatedAt: string;
-  confidence?: number;
+
   locations: Location[];
   wikiInfo?: WikiInfo
 };

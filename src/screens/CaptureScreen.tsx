@@ -23,6 +23,8 @@ import { useTheme } from "react-native-paper";
 import { Ionicons } from "@expo/vector-icons"
 import { SafeAreaView } from "react-native-safe-area-context";
 import { CONFIDENCE_THRESHOLD } from "../constants/constants";
+import { uploadDiscovery } from "../api/cloudSync";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export type RootStackParamList = {
     Home: undefined;
@@ -50,6 +52,9 @@ export default function CaptureScreen() {
         if (!permission?.granted) requestPermission();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [permission]);
+
+    console.log("SUPABASE URL:", process.env.EXPO_PUBLIC_SUPABASE_URL);
+    console.log("SUPABASE KEY:", process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
 
     // helper: convert local uri to base64
     const uriToBase64 = async (uri: string): Promise<string> => {
@@ -175,11 +180,13 @@ export default function CaptureScreen() {
                 throw new Error("Unrecognized API response structure");
             }
 
+            console.log('api response', suggestions)
+
             const top = suggestions[0];
             const speciesName = top?.name ?? top?.plant_name ?? null;
             const confidence = top?.probability ?? 0;
 
-            if (!speciesName || confidence < CONFIDENCE_THRESHOLD) {
+            if (!speciesName) {
                 Alert.alert("Plant not identified", "No match found or confidence too low, please try to add more photos.");
                 return;
             }
@@ -191,14 +198,16 @@ export default function CaptureScreen() {
                 id,
                 speciesName,
                 confidence,
-                photos: [capturedPhotos[0]],
+                photos: [...capturedPhotos], // not [capturedPhotos[0]]
                 createdAt: new Date().toISOString(),
-                locations: [{
-                    latitude: currentPosition.coords.latitude,
-                    longitude: currentPosition.coords.longitude,
-                    date: new Date().toISOString(),
-                }],
-                updatedAt: '',
+                updatedAt: new Date().toISOString(),
+                locations: [
+                    {
+                        latitude: currentPosition.coords.latitude,
+                        longitude: currentPosition.coords.longitude,
+                        date: new Date().toISOString(),
+                    }
+                ]
             };
             // need to check if we already have record with same speciesName, so we don't save another but just update existing one (add another location & time)
             await saveDiscovery(discovery);
