@@ -73,7 +73,7 @@ export default function DiscoveriesScreen() {
                             <Image
                                 source={{
                                     uri:
-                                        item.wikiInfo?.imageUrl
+                                        item.photos[0]
                                 }}
                                 style={styles.thumbnail}
                             />

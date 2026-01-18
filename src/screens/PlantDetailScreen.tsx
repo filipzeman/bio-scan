@@ -67,7 +67,7 @@ export default function PlantDetailScreen() {
             <SafeAreaView style={styles.container}>
                 <ScrollView style={styles.scrollContainer}>
                     {/* Hero Image */}
-                    <Image source={{ uri: discovery.wikiInfo?.imageUrl }} style={styles.image} />
+                    <Image source={{ uri: discovery.photos[0] }} style={styles.image} />
                     {/* Title + Confidence */}
                     <View style={styles.headerSection}>
                         {wikiInfo && <Text style={styles.title}>{wikiInfo?.title || discovery.speciesName}</Text>}

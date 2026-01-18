@@ -1,36 +1,72 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Discovery } from "../types/discovery";
+import { uploadImage } from "./uploadImage";
+import { supabase } from "../lib/supabaseClient";
 
 const DISCOVERIES_KEY = "discoveries";
 
-export async function saveDiscovery(discovery: Discovery) {
-    const existing = await getDiscoveries();
+export async function saveDiscovery(newDiscovery: Discovery) {
+    // 1️⃣ Load local data
+    const existingRaw = await AsyncStorage.getItem("discoveries");
+    const existing: Discovery[] = existingRaw ? JSON.parse(existingRaw) : [];
 
-    const existingDiscovery = existing.find((d) => d.speciesName.toLowerCase() === discovery.speciesName.toLocaleLowerCase());
+    // 2️⃣ Find by speciesName (our merging strategy)
+    const existingIndex = existing.findIndex(
+        d => d.speciesName.toLowerCase() === newDiscovery.speciesName.toLowerCase()
+    );
 
-    let updated: Discovery[];
+    let merged: Discovery;
 
-    if (existingDiscovery) {
-        const merged: Discovery = {
-            ...existingDiscovery,
-            confidence: discovery.confidence ?? existingDiscovery.confidence,
-            photos: Array.from(new Set([...existingDiscovery.photos, ...discovery.photos])),
-            locations: [...existingDiscovery.locations, ...discovery.locations],
+    if (existingIndex !== -1) {
+        // 3️⃣ Merge with the existing record
+        const old = existing[existingIndex];
+
+        merged = {
+            ...old,
             updatedAt: new Date().toISOString(),
-        }
+            photos: [...old.photos, ...newDiscovery.photos],
+            locations: [...old.locations, ...newDiscovery.locations]
+        };
 
-        updated = existing.map((d) => d.speciesName === merged.speciesName ? merged : d)
+        existing[existingIndex] = merged;
     } else {
-        updated = [...existing, discovery]
+        // 4️⃣ First-time discovery
+        merged = {
+            ...newDiscovery,
+            updatedAt: new Date().toISOString(),
+        };
+
+        existing.push(merged);
     }
 
-    // const updated = existing.some(d => d.id === discovery.id)
-    //     ? existing.map(d => (d.id === discovery.id ? discovery : d))
-    //     : [...existing, discovery];
+    // 5️⃣ Save updated list locally
+    await AsyncStorage.setItem("discoveries", JSON.stringify(existing));
 
-    console.log('updated records', updated)
+    // 6️⃣ Upload photos to Supabase storage
+    const userId = "demo-user"; // replace later with real auth user id
+    const uploadedUrls: string[] = [];
 
-    await AsyncStorage.setItem('discoveries', JSON.stringify(updated));
+    for (const photo of merged.photos) {
+        const remoteUrl = await uploadImage(photo, userId);
+        if (remoteUrl) uploadedUrls.push(remoteUrl);
+    }
+
+    // 7️⃣ Upsert metadata into Supabase DB
+    const { error } = await supabase.from("discoveries").upsert({
+        species_name: merged.speciesName,
+        confidence: merged.confidence,
+        photos: uploadedUrls,
+        locations: merged.locations,
+        updated_at: merged.updatedAt,
+        created_at: merged.createdAt,
+        user_id: userId
+    });
+
+    if (error) {
+        console.warn("⚠️ Supabase sync failed, but local save succeeded.", error);
+    }
+
+    return merged;
 }
 
 export const getDiscoveries = async (): Promise<Discovery[]> => {
